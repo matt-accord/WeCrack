@@ -1,0 +1,24 @@
+# Auto-detect text vs binary; git normalizes to LF on commit and CRLF on Windows checkout.
+* text=auto
+
+# Force CRLF for Windows-only source and project files (VS 2026 writes CRLF by default).
+*.cs        text eol=crlf
+*.xaml      text eol=crlf
+*.csproj    text eol=crlf
+*.sln       text eol=crlf
+*.manifest  text eol=crlf
+
+# Force LF for docs — GitHub markdown renders identically either way, LF keeps diffs stable.
+*.md         text eol=lf
+.gitignore   text eol=lf
+.gitattributes text eol=lf
+
+# Binary blobs — never touch line endings, never diff textually.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.exe  binary
+*.dll  binary
+*.pdb  binary

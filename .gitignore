@@ -1,0 +1,50 @@
+# ── build output (all regenerable via `dotnet build` / `dotnet publish`) ──
+bin/
+obj/
+Build/
+*.pdb
+*.dll
+*.exe
+!WeCrack/resources/*.exe                 # (none today, but if a helper .exe ever lives under resources, keep it)
+
+# ── Visual Studio user-local state ────────────────────────────────────────
+.vs/
+*.suo
+*.user
+*.userprefs
+*.userosscache
+*.sln.docstates
+*.opensdf
+*.sdf
+
+# ── ReSharper / Rider ────────────────────────────────────────────────────
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+# ── VS Code ──────────────────────────────────────────────────────────────
+.vscode/
+
+# ── NuGet (SDK-style projects rarely need this, but be safe) ─────────────
+packages/
+*.nuget.props
+*.nuget.targets
+
+# ── OS junk ──────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+*~
+*.swp
+
+# ── project-specific ─────────────────────────────────────────────────────
+# Personal AI-assistant instructions — do not publish.
+CLAUDE.md
+
+# Runtime crash log written by App.xaml.cs.
+WeCrack-crash.log
+
+# User's per-machine config (points at a browsed WeMod install).
+# Lives under %LocalAppData% at runtime, but if a copy ever lands in the repo, ignore it.
+config.json

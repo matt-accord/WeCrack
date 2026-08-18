@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>WeCrack</RootNamespace>
+    <AssemblyName>WeCrack</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>resources\icon.ico</ApplicationIcon>
+    <PublishAot>false</PublishAot>
+  </PropertyGroup>
+
+  <!-- Embed the .ico as a WPF resource so Window.Icon can bind to it (via pack URI) inside the single-file exe. -->
+  <ItemGroup>
+    <Resource Include="resources\icon.ico" />
+  </ItemGroup>
+
+  <!-- Single-file, self-contained publish defaults. `dotnet publish -c Release` emits a lone WeCrack.exe
+       into D:\...\WeCrack\Build\ with zero side-car files and no .NET runtime prereq.
+       Only affects `dotnet publish`; plain `dotnet build` still emits the multi-file dev layout for fast iteration. -->
+  <PropertyGroup>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+    <!-- Publish next to the .sln, not under bin\...\publish\. Path is relative to this csproj. -->
+    <PublishDir>$(MSBuildThisFileDirectory)..\Build\</PublishDir>
+    <!-- Suppress the RID-nested intermediate output when publishing so it lands cleanly in Build\. -->
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+
+</Project>
