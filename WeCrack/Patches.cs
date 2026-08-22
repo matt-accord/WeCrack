@@ -29,19 +29,21 @@ internal static class Patches
             MinFiles:    1, MaxFiles: 2),
 
         // DailyTimeLimit.isEnabled — the 2h daily-limit gate that determines whether the timer runs at all.
+        // Required, and independently sufficient for the timer: DailyTimeLimit reads `account.subscription`
+        // DIRECTLY (not through the `am` getter above), so #1 alone would NOT lift the 2h cap.
         new JsPatch(
             Description: "DailyTimeLimit.isEnabled → false (kills the 2h timer)",
             Pattern:     @"get isEnabled\(\)\{return this\.isEnabledForUser&&!this\.account\?\.subscription\}",
             Replacement: "get isEnabled(){return !1/*P*/                                            }",
             MinFiles:    1, MaxFiles: 1),
 
-        // AccountApi.getUserAccount — inject a synthetic Pro subscription into the /v3/account response
-        // so every downstream selector that reads `account.subscription` or flag bits sees Pro.
-        new JsPatch(
-            Description: "AccountApi.getUserAccount → inject synthetic Pro subscription + flags",
-            Pattern:     @"getUserAccount\(\)\{return this\.#e\.fetch\(\{endpoint:""\/v3\/account"",method:""GET"",name:""\/v3\/account"",collectMetrics:!1\}\)\}",
-            Replacement: @"getUserAccount(){return this.#e.fetch({endpoint:""/v3/account"",method:""GET"",name:""/v3/account"",collectMetrics:!1}).then(a=>(a&&(a.subscription=a.subscription||{state:""active"",tier:""pro""},a.flags=(a.flags||0)|2560),a))}",
-            MinFiles:    1, MaxFiles: 1),
+        // NOTE — a former 4th patch wrapped AccountApi.getUserAccount to inject a fake
+        // {state:"active",tier:"pro"} subscription. It was REMOVED in v1.1: that object is missing every
+        // other field a real subscription carries (nextInvoice, pastDueInvoice, period, endsAt, remoteChannel,
+        // …). Account-update subscribers shared with the trainer page recompute on every account fetch and
+        // threw on those undefined fields, which froze trainer launch permanently on "Loading...".
+        // The `am` getter (#1/#2) already reports Pro to everything that gates on it, so the injection was
+        // both unnecessary and actively harmful. Do NOT reintroduce it without a SHAPE-COMPLETE object.
     };
 
     public sealed record PatchApplication(string ArchivePath, string PatchDescription, int SizeDelta);
