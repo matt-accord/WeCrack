@@ -125,7 +125,7 @@
                                    VerticalAlignment="Center"
                                    FontFamily="{StaticResource Font.Mono}"
                                    Foreground="{StaticResource Brush.Fg.Dim}"
-                                   Text="v1.0"/>
+                                   Text="v1.2"/>
                     </Grid>
                 </Border>
 
@@ -312,10 +312,17 @@
                         </StackPanel>
                     </ScrollViewer>
 
-                    <!-- RIGHT: log console — plain ScrollViewer + StackPanel of TextBlocks -->
+                    <!-- RIGHT: log console — plain ScrollViewer + StackPanel of TextBlocks.
+                         NOTE: outer container MUST be a Grid (not a StackPanel), otherwise the
+                         ScrollViewer inherits an unbounded vertical height budget from the
+                         StackPanel and its scrollbar never appears when content overflows. -->
                     <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,0,0">
-                        <StackPanel>
-                            <Border Style="{StaticResource CardHeader}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Style="{StaticResource CardHeader}">
                                 <Grid>
                                     <TextBlock Style="{StaticResource CardHeaderText}" Text="[ LOG ]"/>
                                     <TextBlock HorizontalAlignment="Right"
@@ -328,14 +335,14 @@
                                     </TextBlock>
                                 </Grid>
                             </Border>
-                            <ScrollViewer x:Name="LogScroller"
+                            <ScrollViewer x:Name="LogScroller" Grid.Row="1"
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Auto"
                                           Background="{StaticResource Brush.Bg.Log}"
                                           Padding="12,10">
                                 <StackPanel x:Name="LogPanel"/>
                             </ScrollViewer>
-                        </StackPanel>
+                        </Grid>
                     </Border>
                 </Grid>
 

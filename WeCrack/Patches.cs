@@ -14,6 +14,15 @@ namespace WeCrack;
 //
 // The four patch shapes have been verified in Wand 12.45.1 and 12.46.1. If any shape ever fails to
 // match, ApplyAll throws with the shape's description — that's the signal to re-recon the JS.
+//
+// NOTE (v1.3) — a v1.2 experiment added four SPECULATIVE gate patches (inline !!x?.subscription,
+// subscription?.state==="active", subscription?.tier==="pro", generic `get isX(){...subscription...}`)
+// to try to unlock themes. They were MinFiles=0 so they were safe to *install*, but at least one of
+// them matched code that WeMod's launch path depends on and froze the app on "Loading...". LESSON:
+// safe-to-install (MinFiles=0, won't abort) is NOT the same as safe-to-run. A patch that MATCHES and
+// FIRES can still break WeMod at runtime — this is the same failure mode that killed the v1.1 injection.
+// Do NOT add blind/speculative patches again. Any new patch must be written against ACTUAL extracted
+// app.asar JS, verified to target exactly the intended gate, and tested against a real launch.
 internal static class Patches
 {
     public sealed record JsPatch(string Description, string Pattern, string Replacement, int MinFiles = 1, int MaxFiles = 2);
@@ -35,6 +44,46 @@ internal static class Patches
             Description: "DailyTimeLimit.isEnabled → false (kills the 2h timer)",
             Pattern:     @"get isEnabled\(\)\{return this\.isEnabledForUser&&!this\.account\?\.subscription\}",
             Replacement: "get isEnabled(){return !1/*P*/                                            }",
+            MinFiles:    1, MaxFiles: 1),
+
+        // ThemeSelector.isPro — the theme picker (settings page) carries its OWN class-local isPro
+        // getter, `get isPro(){return!!this.account?.subscription}`, and gates selectTheme() on it:
+        //     selectTheme(e){("default"===e||this.isPro)&&this.#r.dispatch(...,{theme:e},...)}
+        // Non-Pro users can therefore only pick "default"; every other theme fires the pro-CTA.
+        // This is a DIFFERENT shape than #1 (`const <v>=e=>!!e?.subscription`), which is why #1 never
+        // touched it and themes stayed locked after INSTALL. Added v1.4 via real recon of the extracted
+        // 12.54.1 bundle: this EXACT getter body is unique across all 494 .js files (verified), and it
+        // lives on a settings-page click handler — NOT the launch/trainer path — so forcing it true is
+        // display-only and cannot recreate the "Loading…" freeze the v1.2 speculative patches caused.
+        // Length-preserving (47→47). MinFiles/MaxFiles=1: if the shape ever drifts, INSTALL aborts loudly.
+        new JsPatch(
+            Description: "ThemeSelector.isPro getter → true (unlocks Pro themes: selection gate)",
+            Pattern:     @"get isPro\(\)\{return!!this\.account\?\.subscription\}",
+            Replacement: "get isPro(){return!0/*P*/                     }",
+            MinFiles:    1, MaxFiles: 1),
+
+        // Theme applier reset-gate — NECESSARY PARTNER to the getter above. Patch #3 alone is
+        // insufficient: it lets ThemeSelector.selectTheme() DISPATCH a pro theme, but a separate
+        // applier class (module 60990 in app-14a492d5) re-checks the REAL account on every theme/
+        // subscription change and silently reverts:
+        //     #p(){return"default"!==this.theme&&!this.subscription&&(this.#a.dispatch(o.Kc,{theme:"default"},"theme_applier",!0),!0)}
+        //     themeChanged(e,t){this.#p()||(t&&body.classList.remove(`theme-${t}`),body.classList.add(`theme-${e}`))}
+        //     subscriptionChanged(){this.#p()||this.themeChanged(this.theme)}
+        // For a free account (`this.subscription` is null via selector `e=>e.account?.subscription`),
+        // #p() is truthy for any non-default theme, so themeChanged NEVER applies it AND #p() dispatches
+        // a reset back to "default". Net effect with only #3: clicking a Pro theme does nothing —
+        // no upsell (correctly suppressed by #3), no theme change. That was the "can't click" report.
+        // Fix: force `!this.subscription` → `!1` so #p() is always false → the applier applies the
+        // chosen theme and never resets. The reset dispatch is short-circuited out of the && chain.
+        // Verified at runtime (12.54.1, patched asar + fuse, CDP): Pro theme applies on click AND
+        // persists across in-app navigation; app launches clean (no "Loading…" freeze). NOTE: the
+        // theme setting is backend-synced, so it may reset to default on a full app RESTART — that
+        // deeper sync layer is deliberately NOT touched (faking it risks the v1.1 shape-incomplete
+        // freeze). Unique across all 494 .js files (verified). Length-preserving (35→35).
+        new JsPatch(
+            Description: "Theme applier reset-gate → disabled (Pro theme applies + sticks in-session)",
+            Pattern:     @"!==this\.theme&&!this\.subscription&&",
+            Replacement: "!==this.theme&&!1/*            */&&",
             MinFiles:    1, MaxFiles: 1),
 
         // NOTE — a former 4th patch wrapped AccountApi.getUserAccount to inject a fake
