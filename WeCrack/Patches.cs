@@ -86,6 +86,30 @@ internal static class Patches
             Replacement: "!==this.theme&&!1/*            */&&",
             MinFiles:    1, MaxFiles: 1),
 
+        // AdPopup.accountChanged — kills the sidebar ad panel + "Remove ads with Wand PRO" CTA banner.
+        // The AdPopup class (module "ads/ad-popup" in app-4e8d88bd) sets its `active` flag from a
+        // three-branch ternary in accountChanged():
+        //     accountChanged(){
+        //       (0,v.Lt)(this.account?.flags, u.GQ.AdDeveloper) ? this.active=!0
+        //       : this.account?.subscription                    ? this.active=!1
+        //       :                                                 this.active=!0    // ← free users: SHOW ads
+        //     }
+        // The template `<div class="wrapper" if.bind="active && isVisible">...</div>` gates BOTH the
+        // <ad-view> iframe (real ad) AND the "Remove ads with Wand PRO" upsell footer, so a single
+        // flip of the free-user branch removes both. Surgical fix: change the final `:this.active=!0`
+        // to `:this.active=!1`, so the fallback for accounts without a subscription is HIDE, matching
+        // real Pro behavior. The AdDeveloper branch is intentionally left untouched (irrelevant to us).
+        // Verified at runtime (12.54.1, patched + fuse, CDP navigate to Fields of Mistria title page):
+        // ad-popup element exists but its wrapper is not rendered (active=false, wrapperCount=0),
+        // "Remove ads with Wand" text is not present anywhere on the page, and app launches clean.
+        // Unique across the whole bundle (the exact ternary tail `subscription?this.active=!1:this.active=!0`
+        // appears in one file only). Length-preserving (42→42).
+        new JsPatch(
+            Description: "AdPopup.accountChanged free-user branch → hide (removes ads + upsell banner)",
+            Pattern:     @"subscription\?this\.active=!1:this\.active=!0",
+            Replacement: "subscription?this.active=!1:this.active=!1",
+            MinFiles:    1, MaxFiles: 1),
+
         // NOTE — a former 4th patch wrapped AccountApi.getUserAccount to inject a fake
         // {state:"active",tier:"pro"} subscription. It was REMOVED in v1.1: that object is missing every
         // other field a real subscription carries (nextInvoice, pastDueInvoice, period, endsAt, remoteChannel,

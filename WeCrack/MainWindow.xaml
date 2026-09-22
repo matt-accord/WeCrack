@@ -125,7 +125,7 @@
                                    VerticalAlignment="Center"
                                    FontFamily="{StaticResource Font.Mono}"
                                    Foreground="{StaticResource Brush.Fg.Dim}"
-                                   Text="v1.2"/>
+                                   Text="v1.3"/>
                     </Grid>
                 </Border>
 
