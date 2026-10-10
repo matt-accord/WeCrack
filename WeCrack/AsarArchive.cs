@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -112,11 +113,21 @@ internal sealed class AsarArchive
         _fileOverrides[archivePath] = contents;
     }
 
-    // Serialize the archive with recomputed offsets. Integrity manifests are stripped by default because
-    // the crack disables the ASAR-integrity fuse; leaving stale integrity entries in the header would be
-    // fine at runtime but is wasted bytes.
-    public void Save(string path, bool stripIntegrity = true)
+    // Serialize the archive with recomputed offsets AND recomputed per-file integrity records.
+    // Electron 12.56.0+ validates block-level SHA256 for every file when the integrity fuse is
+    // enabled; the whole asar fails to launch if any integrity record is stale, missing, or
+    // inconsistent across files. We recompute integrity cleanly for every file (packed + unpacked)
+    // so the caller can leave the fuse ENABLED and simply update Wand.exe's top-level stored
+    // header hash — Electron then validates everything legitimately end-to-end.
+    //
+    // `asarUnpackedDir` is the on-disk directory where unpacked files live (`<asar path>.unpacked`),
+    // used to read bytes of unpacked files for their integrity recomputation. When null, defaults
+    // to <path>.unpacked next to the output. If an unpacked file isn't on disk, we keep its
+    // original integrity record untouched (we didn't modify it, so the original hash is still valid).
+    public void Save(string path, bool stripIntegrity = true, string? asarUnpackedDir = null)
     {
+        asarUnpackedDir ??= path + ".unpacked";
+
         // Snapshot original (offset,size) for every file BEFORE we mutate the header — the source bytes
         // still need to be located by their pre-existing positions while we're writing.
         var originals = new Dictionary<string, (long Offset, long Size)>(StringComparer.OrdinalIgnoreCase);
@@ -129,19 +140,42 @@ internal sealed class AsarArchive
         }
 
         long cursor = 0;
-        var writeOrder = new List<(string ArchivePath, long Size, byte[]? Override)>();
+        var writeOrder = new List<(string ArchivePath, long Size, byte[]? Override, JsonObject Node)>();
         foreach (var (archivePath, node) in EnumerateFiles())
         {
-            if (node["unpacked"]?.GetValue<bool>() == true) continue;
+            if (node["unpacked"]?.GetValue<bool>() == true)
+            {
+                // Unpacked file: live on disk, not inside the asar. Recompute integrity from the
+                // on-disk file if it exists; otherwise leave the original integrity record alone
+                // (nothing in this archive touches unpacked files, so the original is still valid).
+                if (stripIntegrity)
+                {
+                    var diskPath = Path.Combine(asarUnpackedDir, archivePath.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(diskPath))
+                    {
+                        var bytes = File.ReadAllBytes(diskPath);
+                        node["integrity"] = BuildIntegrityNode(bytes);
+                    }
+                }
+                continue;
+            }
 
             byte[]? overrideBytes = _fileOverrides.TryGetValue(archivePath, out var v) ? v : null;
             long newSize = overrideBytes?.LongLength ?? originals[archivePath].Size;
 
             node["offset"] = cursor.ToString(CultureInfo.InvariantCulture);
             node["size"] = newSize;
-            if (stripIntegrity) node.Remove("integrity");
 
-            writeOrder.Add((archivePath, newSize, overrideBytes));
+            if (stripIntegrity)
+            {
+                // Compute integrity from the bytes we're about to write — the override if present,
+                // otherwise the source slice. This keeps the integrity record consistent with the
+                // actual file bytes in the output archive.
+                byte[] contentBytes = overrideBytes ?? SliceSourceFile(archivePath, originals[archivePath]);
+                node["integrity"] = BuildIntegrityNode(contentBytes);
+            }
+
+            writeOrder.Add((archivePath, newSize, overrideBytes, node));
             cursor += newSize;
         }
 
@@ -163,7 +197,7 @@ internal sealed class AsarArchive
         var pad = jsonPaddedLen - jsonBytes.Length;
         if (pad > 0) fs.Write(new byte[pad]);
 
-        foreach (var (archivePath, _, overrideBytes) in writeOrder)
+        foreach (var (archivePath, _, overrideBytes, _) in writeOrder)
         {
             if (overrideBytes is not null)
             {
@@ -177,6 +211,48 @@ internal sealed class AsarArchive
                 fs.Write(_sourceBytes, checked((int)absolute), checked((int)origSize));
             }
         }
+    }
+
+    private byte[] SliceSourceFile(string archivePath, (long Offset, long Size) orig)
+    {
+        var buffer = new byte[orig.Size];
+        Array.Copy(_sourceBytes, _dataStart + orig.Offset, buffer, 0, orig.Size);
+        return buffer;
+    }
+
+    // Builds Electron's per-file integrity record:
+    //   { algorithm: "SHA256", hash: <sha256 of whole file>, blockSize: 4194304, blocks: [<sha256 of each 4MB block>] }
+    // For files ≤ 4MB, `hash` and `blocks[0]` are identical (one block covers the whole file).
+    // Verified empirically from a pristine WeMod asar — matches the exact shape Electron validates.
+    private const int IntegrityBlockSize = 4 * 1024 * 1024;
+    private static JsonObject BuildIntegrityNode(byte[] data)
+    {
+        using var sha = SHA256.Create();
+        var topHash = Convert.ToHexString(sha.ComputeHash(data)).ToLowerInvariant();
+
+        var blocks = new JsonArray();
+        if (data.Length == 0)
+        {
+            blocks.Add(topHash); // empty-file hash as a single block, matches pack behavior
+        }
+        else
+        {
+            for (int offset = 0; offset < data.Length; offset += IntegrityBlockSize)
+            {
+                var len = Math.Min(IntegrityBlockSize, data.Length - offset);
+                var blockHash = Convert.ToHexString(SHA256.HashData(new ReadOnlySpan<byte>(data, offset, len)))
+                    .ToLowerInvariant();
+                blocks.Add(blockHash);
+            }
+        }
+
+        return new JsonObject
+        {
+            ["algorithm"] = "SHA256",
+            ["hash"] = topHash,
+            ["blockSize"] = IntegrityBlockSize,
+            ["blocks"] = blocks,
+        };
     }
 
     private JsonObject? ResolveFileNode(string archivePath)

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Win32;
 
 namespace WeCrack;
@@ -18,29 +19,61 @@ internal sealed class WandInstallNotFoundException : Exception
 }
 
 // Resolves the current Wand install layout, exposes paths, checks lock/running state,
-// and applies the one-byte Electron fuse patch. All state lives on disk; nothing static.
+// and provides read/write access to Electron's asar-integrity metadata in Wand.exe.
+//
+// There are TWO pieces of asar-integrity metadata inside Wand.exe:
+//   1. The Electron FUSE wire (sentinel-anchored). Fuse index 4 is EmbeddedAsarIntegrityValidation
+//      (0x31 = ENABLED, 0x30 = DISABLED). Flipping it tells Electron "skip the hash check".
+//   2. A STORED-HASH JSON record `[{"file":"resources\app.asar","alg":"SHA256","value":"<64 hex>"}]`
+//      sitting in the executable's resource section. When the fuse is ENABLED, Electron computes
+//      SHA256 of the loaded asar's HEADER (not the whole file) and compares it to this stored
+//      value; a mismatch aborts launch.
+//
+// WeCrack v1.0..v1.3 took approach (1) — flip the fuse. v1.4 switched to approach (2) — leave the
+// fuse ENABLED and OVERWRITE the stored hash to match the patched asar. Reason: WeMod 12.56.0
+// added a secondary native check that notices when the fuse byte has been modified from its
+// shipped-default state (ENABLED by default on 12.56.0+) and refuses to activate mods for games.
+// The hash-update approach leaves the fuse byte untouched, so that secondary check sees nothing
+// suspicious and lets the trainer run normally. Fuse methods are preserved on this class for
+// state reporting and for UNINSTALL's full restore (which copies Wand.exe.orig back verbatim).
 internal sealed class WandInstall
 {
     public string InstallRoot { get; }           // e.g. %LocalAppData%\Wand
-    public string AppVersionDir { get; }         // e.g. %LocalAppData%\Wand\app-12.46.1
+    public string AppVersionDir { get; }         // e.g. %LocalAppData%\Wand\app-12.56.0
     public string WandExe => Path.Combine(AppVersionDir, "Wand.exe");
     public string AppAsar => Path.Combine(AppVersionDir, "resources", "app.asar");
     public string WandExeBackup => WandExe + ".orig";
     public string AppAsarBackup => AppAsar + ".orig";
 
+    // The privileged helper that performs trainer DLL injection and (since WeMod 12.62.0) runs the
+    // client integrity check. It's an UNPACKED asar file living on disk; see ServicePatch.cs.
+    public string AuxService => Path.Combine(
+        AppVersionDir, "resources", "app.asar.unpacked", "static", "unpacked", "auxiliary",
+        "WandAuxiliaryService.exe");
+    public string AuxServiceBackup => AuxService + ".orig";
+
     public long FuseIntegrityOffset { get; }
+    public long HashSlotOffset      { get; }   // byte offset in Wand.exe of the 64-char hex hash
 
     public const byte FuseEnabled  = 0x31; // ASCII '1'
     public const byte FuseDisabled = 0x30; // ASCII '0'
 
-    private static readonly byte[] FuseSentinel = System.Text.Encoding.ASCII.GetBytes(
+    public const int HashHexLength = 64; // SHA256 as lowercase hex
+
+    private static readonly byte[] FuseSentinel = Encoding.ASCII.GetBytes(
         "dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX");
 
-    private WandInstall(string installRoot, string versionDir, long fuseOffset)
+    // Prefix of the JSON blob that precedes the 64-char hash. Contains ONE literal pair of
+    // backslashes (JSON-escaped path separator) between "resources" and "app.asar".
+    private static readonly byte[] HashSlotPrefix = Encoding.ASCII.GetBytes(
+        @"[{""file"":""resources\\app.asar"",""alg"":""SHA256"",""value"":""");
+
+    private WandInstall(string installRoot, string versionDir, long fuseOffset, long hashSlotOffset)
     {
         InstallRoot = installRoot;
         AppVersionDir = versionDir;
         FuseIntegrityOffset = fuseOffset;
+        HashSlotOffset = hashSlotOffset;
     }
 
     // Tries every known way to locate a Wand install, in order:
@@ -81,7 +114,8 @@ internal sealed class WandInstall
 
     // Given ANY plausible path (install root or a specific app-XX.YY.Z subfolder), returns a
     // usable WandInstall or null. Handles the common user-confusion case of pointing at the
-    // version folder instead of the parent.
+    // version folder instead of the parent. Also refuses to return a non-fuses-build install
+    // (sentinel missing) — safer than patching blind.
     private static WandInstall? TryLoad(string path)
     {
         path = path.Trim().TrimEnd('\\', '/');
@@ -106,11 +140,15 @@ internal sealed class WandInstall
         var wandExe = Path.Combine(versionDir, "Wand.exe");
         if (!File.Exists(wandExe)) return null;
 
-        long fuseOffset;
-        try { fuseOffset = FindFuseOffset(wandExe); }
-        catch { return null; } // sentinel missing = not an Electron-fuses build; refuse rather than patch blind
-
-        return new WandInstall(path, versionDir, fuseOffset);
+        long fuseOffset, hashSlotOffset;
+        try
+        {
+            var raw = File.ReadAllBytes(wandExe);
+            fuseOffset = FindFuseOffset(raw);
+            hashSlotOffset = FindHashSlotOffset(raw);
+        }
+        catch { return null; } // sentinel / hash slot missing = not a build we can safely patch
+        return new WandInstall(path, versionDir, fuseOffset, hashSlotOffset);
     }
 
     private static IEnumerable<(string ViewLabel, string SubKey)> RegistryCandidates()
@@ -159,6 +197,10 @@ internal sealed class WandInstall
         return (byte)b;
     }
 
+    // Legacy (v1.3 and earlier) — flips Electron's EmbeddedAsarIntegrityValidation fuse.
+    // v1.4+ installs leave the fuse alone; this method is retained only for callers that
+    // might still want it (e.g. a future compatibility fallback). The current Install path
+    // uses WriteStoredHash instead.
     public string DisableIntegrityFuse()
     {
         using var fs = new FileStream(WandExe, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
@@ -172,6 +214,59 @@ internal sealed class WandInstall
         fs.Seek(FuseIntegrityOffset, SeekOrigin.Begin);
         fs.WriteByte(FuseDisabled);
         return $"flipped 0x{current:X2} → 0x{FuseDisabled:X2} at 0x{FuseIntegrityOffset:X}";
+    }
+
+    // Reads the 64-char lowercase-hex SHA256 string that Electron validates the asar header
+    // against. Returns null if the slot bytes aren't valid hex (indicates a bug or layout drift).
+    public string? ReadStoredHash()
+    {
+        using var fs = new FileStream(WandExe, FileMode.Open, FileAccess.Read, FileShare.Read);
+        fs.Seek(HashSlotOffset, SeekOrigin.Begin);
+        var buf = new byte[HashHexLength];
+        var read = fs.Read(buf, 0, HashHexLength);
+        if (read != HashHexLength) return null;
+        var s = Encoding.ASCII.GetString(buf);
+        foreach (var c in s)
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return null;
+        return s;
+    }
+
+    // Overwrites the 64-char stored hash in-place. The hash must be exactly 64 lowercase hex
+    // chars; the method validates and refuses otherwise (silent corruption would brick launch).
+    // FileShare.None keeps concurrent readers out while we write.
+    public void WriteStoredHash(string newHashHex)
+    {
+        if (newHashHex.Length != HashHexLength)
+            throw new ArgumentException($"hash must be {HashHexLength} hex chars (got {newHashHex.Length})", nameof(newHashHex));
+        foreach (var c in newHashHex)
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+                throw new ArgumentException("hash must be lowercase hex (a-f, 0-9)", nameof(newHashHex));
+
+        using var fs = new FileStream(WandExe, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        fs.Seek(HashSlotOffset, SeekOrigin.Begin);
+        fs.Write(Encoding.ASCII.GetBytes(newHashHex), 0, HashHexLength);
+    }
+
+    // Computes the SHA256 that Electron validates against: hash of the asar JSON HEADER bytes
+    // (NOT the whole file). The asar layout is a nested Chromium Pickle; the JSON lives at
+    // offset 16 with length stored at offset 12 (little-endian uint32).
+    public static string ComputeAsarHeaderHash(string asarPath)
+    {
+        using var fs = File.OpenRead(asarPath);
+        var sizeHeader = new byte[16];
+        if (fs.Read(sizeHeader, 0, 16) != 16)
+            throw new InvalidDataException("asar too short for header");
+        var jsonLen = BitConverter.ToUInt32(sizeHeader, 12);
+        var json = new byte[jsonLen];
+        var totalRead = 0;
+        while (totalRead < jsonLen)
+        {
+            var n = fs.Read(json, totalRead, (int)(jsonLen - totalRead));
+            if (n <= 0) throw new InvalidDataException("asar truncated inside header");
+            totalRead += n;
+        }
+        using var sha = SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(json)).ToLowerInvariant();
     }
 
     public static string Sha256Hex(string path)
@@ -190,10 +285,9 @@ internal sealed class WandInstall
 
     // Post-sentinel layout: [version byte][count byte][N fuse-state bytes].
     // Fuse index 4 is EmbeddedAsarIntegrityValidation.
-    private static long FindFuseOffset(string wandExe)
+    private static long FindFuseOffset(byte[] raw)
     {
-        var raw = File.ReadAllBytes(wandExe);
-        var idx = IndexOfBytes(raw, FuseSentinel);
+        var idx = IndexOfBytes(raw, FuseSentinel, 0);
         if (idx < 0)
             throw new InvalidDataException("Electron fuse sentinel not found in Wand.exe.");
 
@@ -201,10 +295,20 @@ internal sealed class WandInstall
         return fusesStart + 4;
     }
 
-    private static int IndexOfBytes(byte[] haystack, byte[] needle)
+    // Finds the SHA256 slot. Scans for the exact JSON prefix that always precedes the hash,
+    // then returns the offset of the first hex char (64 chars long, lowercase a-f/0-9).
+    private static long FindHashSlotOffset(byte[] raw)
+    {
+        var idx = IndexOfBytes(raw, HashSlotPrefix, 0);
+        if (idx < 0)
+            throw new InvalidDataException("Electron asar-integrity hash slot not found in Wand.exe.");
+        return idx + HashSlotPrefix.Length;
+    }
+
+    private static int IndexOfBytes(byte[] haystack, byte[] needle, int start)
     {
         var last = haystack.Length - needle.Length;
-        for (int i = 0; i <= last; i++)
+        for (int i = start; i <= last; i++)
         {
             bool ok = true;
             for (int j = 0; j < needle.Length; j++)

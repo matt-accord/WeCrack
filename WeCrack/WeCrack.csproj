@@ -19,6 +19,13 @@
     <Resource Include="resources\icon.ico" />
   </ItemGroup>
 
+  <!-- dnlib: read/modify .NET assemblies. Used to neutralize the Authenticode-signature gate
+       (W.0 client integrity check) inside WandAuxiliaryService.exe, which WeMod 12.62.0 added
+       to the DLL-injection path. Bundled into the single-file exe automatically. -->
+  <ItemGroup>
+    <PackageReference Include="dnlib" Version="4.4.0" />
+  </ItemGroup>
+
   <!-- Single-file, self-contained publish defaults. `dotnet publish -c Release` emits a lone WeCrack.exe
        into D:\...\WeCrack\Build\ with zero side-car files and no .NET runtime prereq.
        Only affects `dotnet publish`; plain `dotnet build` still emits the multi-file dev layout for fast iteration. -->

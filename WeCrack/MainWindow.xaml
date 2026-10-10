@@ -125,7 +125,7 @@
                                    VerticalAlignment="Center"
                                    FontFamily="{StaticResource Font.Mono}"
                                    Foreground="{StaticResource Brush.Fg.Dim}"
-                                   Text="v1.3"/>
+                                   Text="v1.4"/>
                     </Grid>
                 </Border>
 
@@ -257,7 +257,7 @@
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
                                     <Border Style="{StaticResource CardHeader}">
-                                        <TextBlock Style="{StaticResource CardHeaderText}" Text="[ ELECTRON FUSE ]"/>
+                                        <TextBlock Style="{StaticResource CardHeaderText}" Text="[ ELECTRON INTEGRITY ]"/>
                                     </Border>
                                     <Grid Margin="12">
                                         <Grid.ColumnDefinitions>
@@ -268,15 +268,28 @@
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
                                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Label}" Text="fuse"/>
                                         <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Body}"  Text="EmbeddedAsarIntegrityValidation"/>
-                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Label}" Text="offset" Margin="0,4,0,0"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Label}" Text="fuse offset" Margin="0,4,0,0"/>
                                         <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Body}"  x:Name="LblFuseOffset" Text="—" Margin="0,4,0,0"/>
-                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Label}" Text="state" Margin="0,4,0,0"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Label}" Text="fuse state" Margin="0,4,0,0"/>
                                         <TextBlock Grid.Row="2" Grid.Column="1" x:Name="LblFuseState" Text="—" Margin="0,4,0,0"
                                                    FontFamily="{StaticResource Font.Mono}" FontSize="12" FontWeight="Bold"
                                                    Foreground="{StaticResource Brush.Fg.Amber}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Label}" Text="hash slot" Margin="0,4,0,0"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Body}"  x:Name="LblHashSlot" Text="—" Margin="0,4,0,0"/>
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Label}" Text="hash match" Margin="0,4,0,0"/>
+                                        <TextBlock Grid.Row="4" Grid.Column="1" x:Name="LblHashMatch" Text="—" Margin="0,4,0,0"
+                                                   FontFamily="{StaticResource Font.Mono}" FontSize="12" FontWeight="Bold"
+                                                   Foreground="{StaticResource Brush.Fg.Dim}"/>
+                                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Label}" Text="aux service" Margin="0,4,0,0"/>
+                                        <TextBlock Grid.Row="5" Grid.Column="1" x:Name="LblAuxService" Text="—" Margin="0,4,0,0"
+                                                   FontFamily="{StaticResource Font.Mono}" FontSize="12" FontWeight="Bold"
+                                                   Foreground="{StaticResource Brush.Fg.Dim}"/>
                                     </Grid>
                                 </StackPanel>
                             </Border>

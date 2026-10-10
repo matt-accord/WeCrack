@@ -116,11 +116,28 @@ public partial class MainWindow : Window
 
         LblFuseOffset.Text = r.FuseOffset == 0 ? "—" : $"0x{r.FuseOffset:X}  (byte 0x{r.FuseValue:X2})";
         LblFuseState.Text  = r.FuseState;
+        // v1.4 leaves the fuse ENABLED (green); DISABLED means a legacy v1.3 install we should
+        // migrate; anything else is unexpected.
         LblFuseState.Foreground = r.FuseState switch
         {
-            "ENABLED"  => (Brush)FindResource("Brush.Fg.Amber"),
-            "DISABLED" => (Brush)FindResource("Brush.Fg.Green"),
+            "ENABLED"  => (Brush)FindResource("Brush.Fg.Green"),
+            "DISABLED" => (Brush)FindResource("Brush.Fg.Amber"),
             _          => (Brush)FindResource("Brush.Fg.Red"),
+        };
+
+        LblHashSlot.Text  = r.HashSlotOffset == 0 ? "—" : $"0x{r.HashSlotOffset:X}  ({r.StoredHash.Substring(0, Math.Min(16, r.StoredHash.Length))}...)";
+        LblHashMatch.Text = r.HashSlotOffset == 0 ? "—" : (r.HashMatches ? "MATCH" : "MISMATCH");
+        LblHashMatch.Foreground = r.HashSlotOffset == 0
+            ? (Brush)FindResource("Brush.Fg.Dim")
+            : r.HashMatches ? (Brush)FindResource("Brush.Fg.Green") : (Brush)FindResource("Brush.Fg.Amber");
+
+        LblAuxService.Text = r.AuxServiceState;
+        LblAuxService.Foreground = r.AuxServiceState switch
+        {
+            "PATCHED"  => (Brush)FindResource("Brush.Fg.Green"),
+            "ORIGINAL" => (Brush)FindResource("Brush.Fg.Amber"),
+            "MISSING"  => (Brush)FindResource("Brush.Fg.Red"),
+            _          => (Brush)FindResource("Brush.Fg.Dim"),
         };
 
         (string label, string hint, Brush brush) = r.State switch
